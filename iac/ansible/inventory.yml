@@ -1,0 +1,47 @@
+---
+# Ansible Inventory
+all:
+  children:
+    webservers:
+      hosts:
+        web-01:
+          ansible_host: "{{ hostvars['localhost']['web_01_ip'] }}"
+        web-02:
+          ansible_host: "{{ hostvars['localhost']['web_02_ip'] }}"
+      vars:
+        ansible_user: ubuntu
+        ansible_ssh_private_key_file: ~/.ssh/id_rsa
+        ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+        
+    databases:
+      hosts:
+        db-01:
+          ansible_host: "{{ hostvars['localhost']['db_ip'] }}"
+      vars:
+        ansible_user: ubuntu
+        ansible_ssh_private_key_file: ~/.ssh/id_rsa
+        
+  vars:
+    # Application configuration
+    app_name: startup-website
+    app_version: "{{ app_version | default('latest') }}"
+    app_environment: "{{ environment | default('production') }}"
+    
+    # Docker configuration
+    docker_compose_version: "2.21.0"
+    
+    # Database configuration
+    db_name: startup_db
+    db_user: app_user
+    db_password: "{{ vault_db_password }}"
+    
+    # Domain configuration
+    domain_name: "{{ domain_name | default('startup-demo.com') }}"
+    
+    # SSL configuration
+    ssl_email: admin@startup-demo.com
+    
+    # Monitoring configuration
+    enable_monitoring: true
+    log_level: info
+

@@ -1,0 +1,132 @@
+
+services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    hostname: startup-admin-docker
+    environment:
+      - TS_AUTHKEY=${TAILSCALE_AUTHKEY}
+      - TS_USERSPACE=true
+      - TS_HOSTNAME=startup-admin-docker
+      - TS_ACCEPT_DNS=true
+      - TS_EXTRA_ARGS=--accept-routes
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    networks:
+      - admin-network
+    restart: unless-stopped
+    command: tailscaled
+
+  admin-interface:
+    build:
+      context: ./admin-interface
+      dockerfile: Dockerfile
+    environment:
+      - REACT_APP_API_URL=http://backend-api:5000  # Make sure backend-api is defined or externally accessible
+      - REACT_APP_ADMIN_MODE=true
+      - NODE_ENV=production
+    depends_on:
+      - tailscale
+    ports:
+      - "9999:80"  # expose to localhost:8085  
+    networks:
+      - admin-network
+      - startup-network-alt
+    restart: unless-stopped
+    labels:
+      - "tailscale.expose=8080"
+
+  prometheus-admin:
+    image: prom/prometheus:latest
+    volumes:
+      - ./docker/monitoring/prometheus-admin.yml:/etc/prometheus/prometheus.yml
+      - prometheus-admin-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+      - '--web.listen-address=0.0.0.0:9090'
+    networks:
+      - admin-network
+      - startup-network-alt
+    restart: unless-stopped
+    labels:
+      - "tailscale.expose=9090"
+
+  grafana-admin:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin_change_me}
+      - GF_SERVER_HTTP_PORT=3000
+      - GF_SERVER_DOMAIN=grafana.startup.local
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+    volumes:
+      - grafana-admin-data:/var/lib/grafana
+      - ./docker/monitoring/grafana/admin-dashboards:/etc/grafana/provisioning/dashboards
+      - ./docker/monitoring/grafana/admin-datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus-admin
+    networks:
+      - admin-network
+    restart: unless-stopped
+    labels:
+      - "tailscale.expose=3000"
+
+  nginx-admin:
+    image: nginx:alpine
+    volumes:
+      - ./docker/nginx/admin-nginx.conf:/etc/nginx/nginx.conf
+    ports:
+      - "8085:80"  # expose to localhost:8085  
+    depends_on:
+      - backend-api
+      - admin-interface
+      - prometheus-admin
+      - grafana-admin
+    networks:
+      - admin-network
+      - startup-network-alt   # <-- add this if backend-api is on this network
+    restart: unless-stopped
+    labels:
+      - "tailscale.expose=80"
+
+
+  vpn-gateway:
+    image: alpine:latest
+    command: |
+      sh -c "
+        apk add --no-cache iptables iproute2 &&
+        echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf &&
+        iptables -t nat -A POSTROUTING -s 172.26.0.0/16 -o tailscale0 -j MASQUERADE &&
+        iptables -A FORWARD -i tailscale0 -o eth0 -j ACCEPT &&
+        iptables -A FORWARD -i eth0 -o tailscale0 -m state --state RELATED,ESTABLISHED -j ACCEPT &&
+        tail -f /dev/null
+      "
+    cap_add:
+      - NET_ADMIN
+    networks:
+      - admin-network
+    depends_on:
+      - tailscale
+    restart: unless-stopped
+
+networks:
+  admin-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.26.0.0/16
+    internal: false
+
+  startup-network-alt:
+    external: true
+
+volumes:
+  tailscale-state:
+  prometheus-admin-data:
+  grafana-admin-data:

@@ -1,0 +1,40 @@
+{
+  "name": "startup-website",
+  "version": "1.0.0",
+  "description": "Site web professionnel avec architecture cloud moderne",
+  "main": "index.js",
+  "scripts": {
+    "dev": "cd services/frontend && pnpm run dev",
+    "build": "cd services/frontend && pnpm run build",
+    "preview": "cd services/frontend && pnpm run preview",
+    "docker:up": "cd docker && docker-compose up -d",
+    "docker:down": "cd docker && docker-compose down",
+    "terraform:init": "cd iac/terraform && terraform init",
+    "terraform:plan": "cd iac/terraform && terraform plan",
+    "terraform:apply": "cd iac/terraform && terraform apply",
+    "ansible:deploy": "cd iac/ansible && ansible-playbook deploy.yml"
+  },
+  "keywords": [
+    "startup",
+    "website",
+    "react",
+    "terraform",
+    "ansible",
+    "docker",
+    "gcp",
+    "aws"
+  ],
+  "author": "Startup Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/startup-website.git"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "dependencies": {
+    "pnpm": "^10.12.1"
+  }
+}

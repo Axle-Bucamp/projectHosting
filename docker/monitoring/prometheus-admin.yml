@@ -1,0 +1,28 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'backend-api'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['backend-api:5000']   # Your Flask app should expose metrics on this
+
+  - job_name: 'frontend'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['frontend:80']        # If your frontend exposes metrics (unlikely)
+
+  - job_name: 'admin-interface'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['admin-interface:80']
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']    # Prometheus monitoring itself
+
+  - job_name: 'grafana'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['grafana:3000']

@@ -1,0 +1,29 @@
+{{ app_dir }}/logs/*.log {
+    daily
+    missingok
+    rotate 52
+    compress
+    delaycompress
+    notifempty
+    create 644 ubuntu ubuntu
+    sharedscripts
+    postrotate
+        systemctl reload {{ app_name }} > /dev/null 2>&1 || true
+        systemctl reload nginx > /dev/null 2>&1 || true
+    endscript
+}
+
+/var/log/nginx/*.log {
+    daily
+    missingok
+    rotate 52
+    compress
+    delaycompress
+    notifempty
+    create 644 www-data www-data
+    sharedscripts
+    postrotate
+        systemctl reload nginx > /dev/null 2>&1 || true
+    endscript
+}
+

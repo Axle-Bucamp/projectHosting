@@ -1,0 +1,82 @@
+# Container declaration for admin instances with Tailscale
+spec:
+  containers:
+    - name: tailscale
+      image: tailscale/tailscale:latest
+      env:
+        - name: TS_AUTHKEY
+          value: "${tailscale_auth_key}"
+        - name: TS_STATE_DIR
+          value: "/var/lib/tailscale"
+        - name: TS_USERSPACE
+          value: "false"
+        - name: TS_HOSTNAME
+          value: "${project_name}-admin"
+      securityContext:
+        capabilities:
+          add:
+            - NET_ADMIN
+            - SYS_MODULE
+      volumeMounts:
+        - name: tailscale-state
+          mountPath: /var/lib/tailscale
+        - name: dev-net-tun
+          mountPath: /dev/net/tun
+      resources:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "256Mi"
+          cpu: "200m"
+
+    - name: admin-interface
+      image: gcr.io/${project_name}/admin:latest
+      ports:
+        - containerPort: 8080
+      env:
+        - name: REACT_APP_API_URL
+          value: "http://startup-backend:5000"
+        - name: REACT_APP_ADMIN_MODE
+          value: "true"
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "250m"
+        limits:
+          memory: "512Mi"
+          cpu: "500m"
+
+    - name: monitoring-proxy
+      image: nginx:alpine
+      ports:
+        - containerPort: 9090
+        - containerPort: 3001
+      volumeMounts:
+        - name: monitoring-config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+      resources:
+        requests:
+          memory: "64Mi"
+          cpu: "50m"
+        limits:
+          memory: "128Mi"
+          cpu: "100m"
+
+  volumes:
+    - name: tailscale-state
+      hostPath:
+        path: /var/lib/tailscale
+        type: DirectoryOrCreate
+    - name: dev-net-tun
+      hostPath:
+        path: /dev/net/tun
+        type: CharDevice
+    - name: monitoring-config
+      configMap:
+        name: monitoring-config
+
+  restartPolicy: Always
+  hostNetwork: true  # Required for Tailscale
+

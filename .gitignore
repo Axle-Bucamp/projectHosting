@@ -1,0 +1,7 @@
+node_modules
+.key
+.env
+venv
+__build__
+*.pyc
+*.tar.gz

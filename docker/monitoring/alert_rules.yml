@@ -1,0 +1,261 @@
+# Prometheus Alert Rules
+# Comprehensive monitoring rules for startup website
+
+groups:
+  - name: startup-website.rules
+    rules:
+      # Instance and Service Health
+      - alert: InstanceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Instance {{ $labels.instance }} down"
+          description: "{{ $labels.instance }} of job {{ $labels.job }} has been down for more than 1 minute."
+
+      - alert: ServiceDown
+        expr: up{job=~"backend-api|frontend|healthcheck"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Service {{ $labels.job }} on {{ $labels.instance }} is down."
+
+      # CPU and Memory Alerts
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 80% for more than 5 minutes on {{ $labels.instance }}."
+
+      - alert: CriticalCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 95
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 95% for more than 2 minutes on {{ $labels.instance }}."
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 85% for more than 5 minutes on {{ $labels.instance }}."
+
+      - alert: CriticalMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 95% for more than 2 minutes on {{ $labels.instance }}."
+
+      # Disk Space Alerts
+      - alert: DiskSpaceLow
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Disk space is below 20% on {{ $labels.instance }}."
+
+      - alert: DiskSpaceCritical
+        expr: (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100 < 10
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical disk space on {{ $labels.instance }}"
+          description: "Disk space is below 10% on {{ $labels.instance }}."
+
+      # Application-specific Alerts
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High response time for {{ $labels.job }}"
+          description: "95th percentile response time is above 2 seconds for {{ $labels.job }}."
+
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) * 100 > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate for {{ $labels.job }}"
+          description: "Error rate is above 5% for {{ $labels.job }}."
+
+      - alert: CriticalErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) * 100 > 10
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical error rate for {{ $labels.job }}"
+          description: "Error rate is above 10% for {{ $labels.job }}."
+
+      # Database Alerts
+      - alert: PostgreSQLDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL database is down on {{ $labels.instance }}."
+
+      - alert: PostgreSQLTooManyConnections
+        expr: sum by (instance) (pg_stat_activity_count) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL too many connections"
+          description: "PostgreSQL has more than 80 connections on {{ $labels.instance }}."
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis is down"
+          description: "Redis cache is down on {{ $labels.instance }}."
+
+      - alert: RedisHighMemoryUsage
+        expr: redis_memory_used_bytes / redis_memory_max_bytes * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis high memory usage"
+          description: "Redis memory usage is above 90% on {{ $labels.instance }}."
+
+      # Container Alerts
+      - alert: ContainerKilled
+        expr: time() - container_last_seen > 60
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container killed"
+          description: "Container {{ $labels.name }} was killed on {{ $labels.instance }}."
+
+      - alert: ContainerCpuUsage
+        expr: (rate(container_cpu_usage_seconds_total[3m]) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container CPU usage"
+          description: "Container {{ $labels.name }} CPU usage is above 80% on {{ $labels.instance }}."
+
+      - alert: ContainerMemoryUsage
+        expr: (container_memory_usage_bytes / container_spec_memory_limit_bytes) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container memory usage"
+          description: "Container {{ $labels.name }} memory usage is above 80% on {{ $labels.instance }}."
+
+      # Network Alerts
+      - alert: HighNetworkReceive
+        expr: rate(node_network_receive_bytes_total[5m]) > 100000000  # 100MB/s
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High network receive on {{ $labels.instance }}"
+          description: "Network receive is above 100MB/s on interface {{ $labels.device }} of {{ $labels.instance }}."
+
+      - alert: HighNetworkTransmit
+        expr: rate(node_network_transmit_bytes_total[5m]) > 100000000  # 100MB/s
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High network transmit on {{ $labels.instance }}"
+          description: "Network transmit is above 100MB/s on interface {{ $labels.device }} of {{ $labels.instance }}."
+
+      # SSL Certificate Alerts
+      - alert: SSLCertificateExpiry
+        expr: probe_ssl_earliest_cert_expiry - time() < 86400 * 30  # 30 days
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "SSL certificate expiring soon"
+          description: "SSL certificate for {{ $labels.instance }} expires in less than 30 days."
+
+      - alert: SSLCertificateExpiryCritical
+        expr: probe_ssl_earliest_cert_expiry - time() < 86400 * 7  # 7 days
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: "SSL certificate expiring very soon"
+          description: "SSL certificate for {{ $labels.instance }} expires in less than 7 days."
+
+      # Load Balancer Alerts
+      - alert: LoadBalancerDown
+        expr: probe_success{job="blackbox"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Load balancer health check failed"
+          description: "Load balancer health check failed for {{ $labels.instance }}."
+
+      # Backup Alerts
+      - alert: BackupFailed
+        expr: time() - backup_last_success_timestamp > 86400 * 2  # 2 days
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backup failed or overdue"
+          description: "Backup has not completed successfully for more than 2 days."
+
+      # Log Alerts
+      - alert: HighLogErrorRate
+        expr: rate(log_entries_total{level="error"}[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error log rate"
+          description: "Error log rate is above 10 errors per minute for {{ $labels.job }}."
+
+      # Custom Business Logic Alerts
+      - alert: LowUserActivity
+        expr: rate(user_actions_total[1h]) < 10
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low user activity"
+          description: "User activity is below normal levels (less than 10 actions per hour)."
+
+      - alert: HighContactFormSubmissions
+        expr: rate(contact_form_submissions_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High contact form submission rate"
+          description: "Contact form submissions are above 5 per minute, possible spam attack."
+

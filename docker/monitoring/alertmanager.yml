@@ -1,0 +1,79 @@
+global:
+  smtp_smarthost: 'localhost:587'
+  smtp_from: 'alerts@startup-website.com'
+  smtp_auth_username: 'alerts@startup-website.com'
+  smtp_auth_password: 'your-email-password'
+
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'web.hook'
+  routes:
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 5s
+      repeat_interval: 30m
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+      repeat_interval: 2h
+    - match:
+        alertname: 'InstanceDown'
+      receiver: 'instance-down'
+      group_wait: 5s
+      repeat_interval: 15m
+
+receivers:
+  - name: 'web.hook'
+    webhook_configs:
+      - url: http://localhost:5001/alert  # double check and set via env if needed
+        send_resolved: true
+
+  - name: 'critical-alerts'
+    email_configs:
+      - to: '{{ .admin_email }}'
+        text: |
+          🚨 CRITICAL: {{ .GroupLabels.alertname }}
+
+          Alert: {{ .GroupLabels.alertname }}
+          Severity: {{ .CommonLabels.severity }}
+          Instance: {{ .CommonLabels.instance }}
+          Description: {{ .CommonAnnotations.description }}
+
+          Time: {{ .CommonAnnotations.timestamp }}
+
+          Dashboard: http://grafana:3000/d/startup-overview
+
+  - name: 'warning-alerts'
+    email_configs:
+      - to: '{{ .admin_email }}'
+        text: |
+          ⚠️ WARNING: {{ .GroupLabels.alertname }}
+
+          Alert: {{ .GroupLabels.alertname }}
+          Severity: {{ .CommonLabels.severity }}
+          Instance: {{ .CommonLabels.instance }}
+          Description: {{ .CommonAnnotations.description }}
+
+  - name: 'instance-down'
+    email_configs:
+      - to: '{{ .admin_email }}'
+        text: |
+          💥 INSTANCE DOWN: {{ .CommonLabels.instance }}
+
+          Instance {{ .CommonLabels.instance }} is down!
+
+          This requires immediate attention.
+
+          Time: {{ .CommonAnnotations.timestamp }}
+          Job: {{ .CommonLabels.job }}
+
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'cluster', 'service']

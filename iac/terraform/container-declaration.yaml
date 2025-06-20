@@ -1,0 +1,74 @@
+# Container declaration for application instances
+spec:
+  containers:
+    - name: startup-frontend
+      image: gcr.io/${project_name}/frontend:latest
+      ports:
+        - containerPort: 80
+      env:
+        - name: REACT_APP_API_URL
+          value: "http://localhost:5000"
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "250m"
+        limits:
+          memory: "512Mi"
+          cpu: "500m"
+
+    - name: startup-backend
+      image: gcr.io/${project_name}/backend:latest
+      ports:
+        - containerPort: 5000
+      env:
+        - name: FLASK_ENV
+          value: "production"
+        - name: DATABASE_URL
+          value: "postgresql://${db_user}:${db_password}@${db_host}:5432/${db_name}"
+        - name: REDIS_URL
+          value: "redis://redis:6379"
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "500m"
+        limits:
+          memory: "1Gi"
+          cpu: "1000m"
+
+    - name: nginx-proxy
+      image: nginx:alpine
+      ports:
+        - containerPort: 80
+        - containerPort: 443
+      volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+      resources:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "256Mi"
+          cpu: "200m"
+
+    - name: redis
+      image: redis:7-alpine
+      ports:
+        - containerPort: 6379
+      command: ["redis-server", "--appendonly", "yes"]
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "250m"
+        limits:
+          memory: "512Mi"
+          cpu: "500m"
+
+  volumes:
+    - name: nginx-config
+      configMap:
+        name: nginx-config
+
+  restartPolicy: Always
+

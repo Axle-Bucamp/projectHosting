@@ -1,0 +1,37 @@
+[Unit]
+Description={{ app_name | title }} Application
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=forking
+User=ubuntu
+Group=ubuntu
+WorkingDirectory={{ app_dir }}
+ExecStart=/usr/local/bin/docker-compose up -d
+ExecStop=/usr/local/bin/docker-compose down
+ExecReload=/usr/local/bin/docker-compose restart
+Restart=always
+RestartSec=10
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+# Environment
+Environment=NODE_ENV={{ app_environment }}
+EnvironmentFile={{ app_dir }}/.env
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ app_dir }}
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier={{ app_name }}
+
+[Install]
+WantedBy=multi-user.target
+

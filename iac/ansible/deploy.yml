@@ -1,0 +1,494 @@
+---
+# Enhanced Ansible Playbook for Production Deployment
+# Startup Website - Complete Infrastructure Setup
+
+- name: Deploy Startup Website Infrastructure
+  hosts: all
+  become: yes
+  gather_facts: yes
+  vars:
+    app_name: "startup-website"
+    app_user: "startup"
+    app_dir: "/opt/{{ app_name }}"
+    docker_compose_version: "2.21.0"
+    node_exporter_version: "1.6.1"
+    tailscale_version: "1.52.1"
+    
+  pre_tasks:
+    - name: Update system packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+        autoremove: yes
+        autoclean: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install required system packages
+      apt:
+        name:
+          - curl
+          - wget
+          - git
+          - unzip
+          - htop
+          - vim
+          - fail2ban
+          - ufw
+          - logrotate
+          - cron
+          - rsync
+          - jq
+          - ca-certificates
+          - gnupg
+          - lsb-release
+          - software-properties-common
+          - apt-transport-https
+        state: present
+      when: ansible_os_family == "Debian"
+
+  tasks:
+    # User and Directory Setup
+    - name: Create application user
+      user:
+        name: "{{ app_user }}"
+        system: yes
+        shell: /bin/bash
+        home: "{{ app_dir }}"
+        create_home: yes
+
+    - name: Create application directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
+      loop:
+        - "{{ app_dir }}"
+        - "{{ app_dir }}/logs"
+        - "{{ app_dir }}/backups"
+        - "{{ app_dir }}/config"
+        - "{{ app_dir }}/data"
+        - "{{ app_dir }}/ssl"
+        - "/etc/{{ app_name }}"
+
+    # Docker Installation
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+
+    - name: Add user to docker group
+      user:
+        name: "{{ app_user }}"
+        groups: docker
+        append: yes
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Install Docker Compose standalone
+      get_url:
+        url: "https://github.com/docker/compose/releases/download/v{{ docker_compose_version }}/docker-compose-linux-x86_64"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+
+    # Tailscale Installation
+    - name: Add Tailscale GPG key
+      apt_key:
+        url: https://pkgs.tailscale.com/stable/ubuntu/focal.noarmor.gpg
+        state: present
+
+    - name: Add Tailscale repository
+      apt_repository:
+        repo: "deb https://pkgs.tailscale.com/stable/ubuntu focal main"
+        state: present
+
+    - name: Install Tailscale
+      apt:
+        name: tailscale
+        state: present
+
+    - name: Configure Tailscale
+      template:
+        src: tailscale.conf.j2
+        dest: /etc/default/tailscaled
+        mode: '0644'
+      notify: restart tailscale
+
+    # Node Exporter Installation
+    - name: Create node_exporter user
+      user:
+        name: node_exporter
+        system: yes
+        shell: /bin/false
+        home: /var/lib/node_exporter
+        create_home: no
+
+    - name: Download and install Node Exporter
+      unarchive:
+        src: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+        dest: /tmp
+        remote_src: yes
+        creates: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64"
+
+    - name: Copy Node Exporter binary
+      copy:
+        src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+        dest: /usr/local/bin/node_exporter
+        mode: '0755'
+        owner: node_exporter
+        group: node_exporter
+        remote_src: yes
+
+    - name: Create Node Exporter systemd service
+      template:
+        src: node_exporter.service.j2
+        dest: /etc/systemd/system/node_exporter.service
+        mode: '0644'
+      notify:
+        - reload systemd
+        - restart node_exporter
+
+    # Security Configuration
+    - name: Configure UFW firewall
+      ufw:
+        rule: "{{ item.rule }}"
+        port: "{{ item.port }}"
+        proto: "{{ item.proto | default('tcp') }}"
+        src: "{{ item.src | default('any') }}"
+      loop:
+        - { rule: 'allow', port: '22', proto: 'tcp' }
+        - { rule: 'allow', port: '80', proto: 'tcp' }
+        - { rule: 'allow', port: '443', proto: 'tcp' }
+        - { rule: 'allow', port: '9100', proto: 'tcp', src: '10.0.0.0/8' }
+        - { rule: 'allow', port: '41641', proto: 'udp' }  # Tailscale
+      notify: enable ufw
+
+    - name: Configure fail2ban
+      template:
+        src: jail.local.j2
+        dest: /etc/fail2ban/jail.local
+        mode: '0644'
+      notify: restart fail2ban
+
+    # SSL/TLS Configuration
+    - name: Generate self-signed SSL certificate for development
+      command: >
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048
+        -keyout {{ app_dir }}/ssl/server.key
+        -out {{ app_dir }}/ssl/server.crt
+        -subj "/C=US/ST=State/L=City/O=Organization/CN={{ ansible_default_ipv4.address }}"
+      args:
+        creates: "{{ app_dir }}/ssl/server.crt"
+      when: environment == "development"
+
+    # Application Deployment
+    - name: Clone application repository
+      git:
+        repo: "{{ app_repository | default('https://github.com/your-org/startup-website.git') }}"
+        dest: "{{ app_dir }}/source"
+        version: "{{ app_version | default('main') }}"
+        force: yes
+      become_user: "{{ app_user }}"
+      when: app_repository is defined
+
+    - name: Copy application files
+      synchronize:
+        src: "{{ playbook_dir }}/../"
+        dest: "{{ app_dir }}/source/"
+        delete: yes
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=node_modules"
+          - "--exclude=venv"
+          - "--exclude=__pycache__"
+          - "--exclude=.pytest_cache"
+          - "--exclude=coverage"
+      become_user: "{{ app_user }}"
+      when: app_repository is not defined
+
+    - name: Create environment file
+      template:
+        src: .env.j2
+        dest: "{{ app_dir }}/source/.env"
+        mode: '0600'
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+
+    - name: Create Docker Compose override file
+      template:
+        src: docker-compose.override.yml.j2
+        dest: "{{ app_dir }}/source/docker-compose.override.yml"
+        mode: '0644'
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+
+    # Database Setup
+    - name: Install PostgreSQL client
+      apt:
+        name: postgresql-client
+        state: present
+
+    - name: Create database backup script
+      template:
+        src: backup-db.sh.j2
+        dest: "{{ app_dir }}/scripts/backup-db.sh"
+        mode: '0755'
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+
+    - name: Create database restore script
+      template:
+        src: restore-db.sh.j2
+        dest: "{{ app_dir }}/scripts/restore-db.sh"
+        mode: '0755'
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+
+    # Monitoring Setup
+    - name: Create monitoring configuration
+      template:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        mode: '0644'
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+      loop:
+        - { src: 'prometheus.yml.j2', dest: '{{ app_dir }}/config/prometheus.yml' }
+        - { src: 'grafana-datasource.yml.j2', dest: '{{ app_dir }}/config/grafana-datasource.yml' }
+        - { src: 'alertmanager.yml.j2', dest: '{{ app_dir }}/config/alertmanager.yml' }
+        - { src: 'loki-config.yml.j2', dest: '{{ app_dir }}/config/loki-config.yml' }
+        - { src: 'promtail-config.yml.j2', dest: '{{ app_dir }}/config/promtail-config.yml' }
+
+    # Log Management
+    - name: Configure logrotate for application logs
+      template:
+        src: logrotate.j2
+        dest: "/etc/logrotate.d/{{ app_name }}"
+        mode: '0644'
+
+    - name: Create log monitoring script
+      template:
+        src: monitor-logs.sh.j2
+        dest: "{{ app_dir }}/scripts/monitor-logs.sh"
+        mode: '0755'
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+
+    # Backup Configuration
+    - name: Create backup script
+      template:
+        src: backup.sh.j2
+        dest: "{{ app_dir }}/scripts/backup.sh"
+        mode: '0755'
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+
+    - name: Create restore script
+      template:
+        src: restore.sh.j2
+        dest: "{{ app_dir }}/scripts/restore.sh"
+        mode: '0755'
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+
+    - name: Setup backup cron job
+      cron:
+        name: "{{ app_name }} backup"
+        minute: "0"
+        hour: "3"
+        job: "{{ app_dir }}/scripts/backup.sh >> {{ app_dir }}/logs/backup.log 2>&1"
+        user: "{{ app_user }}"
+
+    # Health Check Scripts
+    - name: Create health check script
+      template:
+        src: health-check.sh.j2
+        dest: "{{ app_dir }}/scripts/health-check.sh"
+        mode: '0755'
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+
+    - name: Setup health check cron job
+      cron:
+        name: "{{ app_name }} health check"
+        minute: "*/5"
+        job: "{{ app_dir }}/scripts/health-check.sh >> {{ app_dir }}/logs/health-check.log 2>&1"
+        user: "{{ app_user }}"
+
+    # Service Management
+    - name: Create application systemd service
+      template:
+        src: startup-website.service.j2
+        dest: "/etc/systemd/system/{{ app_name }}.service"
+        mode: '0644'
+      notify:
+        - reload systemd
+        - restart startup-website
+
+    - name: Create application management script
+      template:
+        src: manage-app.sh.j2
+        dest: "{{ app_dir }}/scripts/manage-app.sh"
+        mode: '0755'
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+
+    # Performance Tuning
+    - name: Configure system limits
+      template:
+        src: limits.conf.j2
+        dest: /etc/security/limits.d/{{ app_name }}.conf
+        mode: '0644'
+
+    - name: Configure sysctl parameters
+      template:
+        src: sysctl.conf.j2
+        dest: /etc/sysctl.d/99-{{ app_name }}.conf
+        mode: '0644'
+      notify: reload sysctl
+
+    # Update and Maintenance
+    - name: Create update script
+      template:
+        src: update-app.sh.j2
+        dest: "{{ app_dir }}/scripts/update-app.sh"
+        mode: '0755'
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+
+    - name: Create maintenance script
+      template:
+        src: maintenance.sh.j2
+        dest: "{{ app_dir }}/scripts/maintenance.sh"
+        mode: '0755'
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+
+    - name: Setup maintenance cron job
+      cron:
+        name: "{{ app_name }} maintenance"
+        minute: "0"
+        hour: "2"
+        weekday: "0"
+        job: "{{ app_dir }}/scripts/maintenance.sh >> {{ app_dir }}/logs/maintenance.log 2>&1"
+        user: "{{ app_user }}"
+
+    # Final Setup
+    - name: Build and start application
+      shell: |
+        cd {{ app_dir }}/source
+        docker-compose build
+        docker-compose up -d
+      become_user: "{{ app_user }}"
+      environment:
+        COMPOSE_PROJECT_NAME: "{{ app_name }}"
+
+    - name: Wait for application to be ready
+      uri:
+        url: "http://localhost:8000/api/health"
+        method: GET
+        status_code: 200
+      register: health_check
+      until: health_check.status == 200
+      retries: 30
+      delay: 10
+
+    - name: Verify all services are running
+      shell: docker-compose ps --services --filter "status=running"
+      args:
+        chdir: "{{ app_dir }}/source"
+      become_user: "{{ app_user }}"
+      register: running_services
+
+    - name: Display running services
+      debug:
+        msg: "Running services: {{ running_services.stdout_lines }}"
+
+  handlers:
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: restart startup-website
+      systemd:
+        name: "{{ app_name }}"
+        state: restarted
+        enabled: yes
+
+    - name: restart node_exporter
+      systemd:
+        name: node_exporter
+        state: restarted
+        enabled: yes
+
+    - name: restart tailscale
+      systemd:
+        name: tailscaled
+        state: restarted
+        enabled: yes
+
+    - name: enable ufw
+      ufw:
+        state: enabled
+
+    - name: restart fail2ban
+      systemd:
+        name: fail2ban
+        state: restarted
+        enabled: yes
+
+    - name: reload sysctl
+      shell: sysctl -p /etc/sysctl.d/99-{{ app_name }}.conf
+
+  post_tasks:
+    - name: Create deployment summary
+      template:
+        src: deployment-summary.txt.j2
+        dest: "{{ app_dir }}/deployment-summary.txt"
+        mode: '0644'
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+
+    - name: Display deployment information
+      debug:
+        msg: |
+          Deployment completed successfully!
+          
+          Application URL: http://{{ ansible_default_ipv4.address }}
+          Admin Interface: Available via Tailscale
+          Monitoring: http://{{ ansible_default_ipv4.address }}:3001 (Grafana)
+          Metrics: http://{{ ansible_default_ipv4.address }}:9090 (Prometheus)
+          
+          Application directory: {{ app_dir }}
+          Logs directory: {{ app_dir }}/logs
+          Scripts directory: {{ app_dir }}/scripts
+          
+          Management commands:
+          - Start: {{ app_dir }}/scripts/manage-app.sh start
+          - Stop: {{ app_dir }}/scripts/manage-app.sh stop
+          - Restart: {{ app_dir }}/scripts/manage-app.sh restart
+          - Status: {{ app_dir }}/scripts/manage-app.sh status
+          - Update: {{ app_dir }}/scripts/update-app.sh
+          - Backup: {{ app_dir }}/scripts/backup.sh
+          - Health Check: {{ app_dir }}/scripts/health-check.sh
+
