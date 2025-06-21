@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 const AuthContext = createContext();
 
@@ -17,60 +17,65 @@ export const AuthProvider = ({ children }) => {
 
   const isAuthenticated = !!token && !!user;
 
+  const API_BASE_URL = import.meta?.env?.VITE_API_URL || 'http://localhost:8000';; 
+
+  const verifyToken = useCallback(async (savedToken) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/admin/dashboard`, {
+        headers: {
+          Authorization: `Bearer ${savedToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setUser(data.user || { username: 'admin', role: 'admin' }); // Fallback user
+        return true;
+      } else {
+        throw new Error('Invalid token');
+      }
+    } catch (err) {
+      console.error('Auth verification failed:', err);
+      localStorage.removeItem('admin_token');
+      setToken(null);
+      setUser(null);
+      return false;
+    }
+  }, [API_BASE_URL]);
+
   useEffect(() => {
     const initAuth = async () => {
       const savedToken = localStorage.getItem('admin_token');
       if (savedToken) {
         setToken(savedToken);
-        // Verify token validity
-        try {
-          const response = await fetch('/api/admin/dashboard', {
-            headers: {
-              'Authorization': `Bearer ${savedToken}`,
-              'Content-Type': 'application/json'
-            }
-          });
-          
-          if (response.ok) {
-            setUser({ username: 'admin', role: 'admin' });
-          } else {
-            localStorage.removeItem('admin_token');
-            setToken(null);
-          }
-        } catch (error) {
-          console.error('Auth verification failed:', error);
-          localStorage.removeItem('admin_token');
-          setToken(null);
-        }
+        await verifyToken(savedToken);
       }
       setLoading(false);
     };
-
     initAuth();
-  }, []);
+  }, [verifyToken]);
 
   const login = async (username, password) => {
     try {
-      const response = await fetch('/api/admin/login', {
+      const response = await fetch(`${API_BASE_URL}/api/admin/login`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
       });
 
       const data = await response.json();
 
-      if (response.ok && data.success) {
-        setToken(data.token);
-        setUser(data.user);
+      if (response.ok && data.success && data.token) {
         localStorage.setItem('admin_token', data.token);
+        setToken(data.token);
+        setUser(data.user || { username });
         return { success: true };
-      } else {
-        return { success: false, error: data.error || 'Login failed' };
       }
-    } catch (error) {
-      console.error('Login error:', error);
+
+      return { success: false, error: data.error || 'Login failed' };
+    } catch (err) {
+      console.error('Login error:', err);
       return { success: false, error: 'Network error' };
     }
   };
@@ -92,8 +97,7 @@ export const AuthProvider = ({ children }) => {
 
   return (
     <AuthContext.Provider value={value}>
-      {children}
+      {!loading && children}
     </AuthContext.Provider>
   );
 };
-

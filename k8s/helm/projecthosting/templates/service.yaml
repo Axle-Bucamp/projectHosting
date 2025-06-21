@@ -1,0 +1,142 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "projecthosting.fullname" . }}-frontend
+  labels:
+    {{- include "projecthosting.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.ports.frontend }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "projecthosting.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "projecthosting.fullname" . }}-backend
+  labels:
+    {{- include "projecthosting.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.ports.backend }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: 9090
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "projecthosting.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "projecthosting.fullname" . }}-bridge
+  labels:
+    {{- include "projecthosting.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bridge
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.ports.bridge }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: 9090
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "projecthosting.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: bridge
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "projecthosting.fullname" . }}-healthcheck
+  labels:
+    {{- include "projecthosting.labels" . | nindent 4 }}
+    app.kubernetes.io/component: healthcheck
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.ports.healthcheck }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: 9090
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "projecthosting.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: healthcheck
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "projecthosting.fullname" . }}-watchdog
+  labels:
+    {{- include "projecthosting.labels" . | nindent 4 }}
+    app.kubernetes.io/component: watchdog
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+    prometheus.io/path: "/metrics"
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.ports.watchdog }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: 9090
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "projecthosting.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: watchdog
+---
+{{- if .Values.monitoring.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "projecthosting.fullname" . }}-vpn
+  labels:
+    {{- include "projecthosting.labels" . | nindent 4 }}
+    app.kubernetes.io/component: vpn
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.service.ports.vpn }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "projecthosting.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: vpn
+{{- end }}
+

@@ -11,6 +11,7 @@ import Store from './pages/Store';
 import Contacts from './pages/Contacts';
 import Content from './pages/Content';
 import System from './pages/System';
+import Logs from './pages/Logs';
 import Login from './pages/Login';
 import './App.css';
 
@@ -44,6 +45,7 @@ function AppContent() {
             <Route path="/contacts" element={<Contacts />} />
             <Route path="/content" element={<Content />} />
             <Route path="/system" element={<System />} />
+            <Route path="/logs" element={<Logs />} />
           </Routes>
         </main>
       </div>

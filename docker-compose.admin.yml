@@ -33,7 +33,7 @@ services:
       - "9999:80"  # expose to localhost:8085  
     networks:
       - admin-network
-      - startup-network-alt
+      - startup-network
     restart: unless-stopped
     labels:
       - "tailscale.expose=8080"
@@ -53,7 +53,7 @@ services:
       - '--web.listen-address=0.0.0.0:9090'
     networks:
       - admin-network
-      - startup-network-alt
+      - startup-network
     restart: unless-stopped
     labels:
       - "tailscale.expose=9090"
@@ -90,7 +90,7 @@ services:
       - grafana-admin
     networks:
       - admin-network
-      - startup-network-alt   # <-- add this if backend-api is on this network
+      - startup-network   # <-- add this if backend-api is on this network
     restart: unless-stopped
     labels:
       - "tailscale.expose=80"
@@ -120,10 +120,10 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.26.0.0/16
+        - subnet: 172.29.0.0/16
     internal: false
 
-  startup-network-alt:
+  startup-network:
     external: true
 
 volumes:

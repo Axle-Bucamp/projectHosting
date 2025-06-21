@@ -1,6 +1,7 @@
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+  scrape_timeout: 15s
 
 rule_files:
   - "alert_rules.yml"
@@ -11,30 +12,31 @@ alerting:
         - targets: ['alertmanager:9093']
 
 scrape_configs:
-
-  # Prometheus itself
+  # Prometheus server metrics
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
 
-  # Node Exporter
-  - job_name: 'node-exporter'
+  # Node Exporter metrics
+  - job_name: 'node'
     static_configs:
       - targets: ['node-exporter:9100']
+    scrape_interval: 30s
+    scrape_timeout: 10s
 
-  # cAdvisor
+  # cAdvisor metrics
   - job_name: 'cadvisor'
     static_configs:
       - targets: ['cadvisor:8080']
 
-  # Backend API (custom metrics path)
+  # Backend API custom metrics endpoint
   - job_name: 'backend-api'
-    metrics_path: '/api/metrics'
+    metrics_path: '/metrics'
     static_configs:
       - targets: ['backend-api:8000']
     scrape_interval: 30s
 
-  # Frontend (check /metrics returns valid Prometheus format)
+  # Frontend metrics endpoint
   - job_name: 'frontend'
     metrics_path: '/metrics'
     static_configs:
@@ -48,7 +50,7 @@ scrape_configs:
       - targets: ['healthcheck:5000']
     scrape_interval: 15s
 
-  # Project bridge
+  # Project bridge metrics endpoint
   - job_name: 'project-bridge'
     metrics_path: '/metrics'
     static_configs:
@@ -70,12 +72,12 @@ scrape_configs:
     static_configs:
       - targets: ['nginx-exporter:9113']
 
-  # Docker daemon metrics (host only valid on Linux/Mac with Docker socket exposed)
+  # Docker daemon metrics (ensure Docker socket is exposed)
   - job_name: 'docker'
     static_configs:
       - targets: ['host.docker.internal:9323']
 
-  # Blackbox exporter
+  # Blackbox Exporter for HTTP probes
   - job_name: 'blackbox'
     metrics_path: /probe
     params:

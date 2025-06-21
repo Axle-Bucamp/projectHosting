@@ -11,72 +11,90 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # Test Frontend
-  test-frontend:
+  test:
     runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: projecthosting_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Setup Node.js
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '18'
         cache: 'npm'
-        cache-dependency-path: services/frontend/package-lock.json
-    
-    - name: Install dependencies
-      working-directory: services/frontend
-      run: npm ci
-    
-    - name: Run tests
-      working-directory: services/frontend
-      run: npm run test
-    
-    - name: Build frontend
-      working-directory: services/frontend
-      run: npm run build
 
-  # Test Backend APIs
-  test-backend:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup Python
-      uses: actions/setup-python@v4
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r backend-api/requirements.txt
+        pip install pytest pytest-cov pytest-asyncio
+
+    - name: Install Node.js dependencies
+      run: |
+        cd services/frontend && npm ci
+        cd ../../admin-interface && npm ci
+
+    - name: Run Python unit tests
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/projecthosting_test
+        REDIS_URL: redis://localhost:6379/0
+        JWT_SECRET_KEY: test-secret-key
+      run: |
+        cd backend-api
+        python -m pytest tests/ -v --cov=src --cov-report=xml
+
+    - name: Run JavaScript unit tests
+      run: |
+        cd services/frontend && npm test -- --coverage --watchAll=false
+        cd ../../admin-interface && npm test -- --coverage --watchAll=false
+
+    - name: Run integration tests
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/projecthosting_test
+        REDIS_URL: redis://localhost:6379/0
+        JWT_SECRET_KEY: test-secret-key
+      run: |
+        python -m pytest tests/integration/ -v
+
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
       with:
-        python-version: '3.11'
-    
-    - name: Install dependencies - Healthcheck API
-      working-directory: services/healthcheck-api
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov
-    
-    - name: Test Healthcheck API
-      working-directory: services/healthcheck-api
-      run: |
-        python -m pytest tests/ -v --cov=src
-    
-    - name: Install dependencies - Project Bridge
-      working-directory: services/project-bridge
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov
-    
-    - name: Test Project Bridge
-      working-directory: services/project-bridge
-      run: |
-        python -m pytest tests/ -v --cov=src
+        files: ./backend-api/coverage.xml,./services/frontend/coverage/lcov.info,./admin-interface/coverage/lcov.info
 
-  # Security Scan
-  security-scan:
+  security:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
       with:
@@ -84,172 +102,160 @@ jobs:
         scan-ref: '.'
         format: 'sarif'
         output: 'trivy-results.sarif'
-    
-    - name: Upload Trivy scan results to GitHub Security tab
+
+    - name: Upload Trivy scan results
       uses: github/codeql-action/upload-sarif@v2
-      if: always()
       with:
         sarif_file: 'trivy-results.sarif'
 
-  # Build and Push Docker Images
-  build-and-push:
-    needs: [test-frontend, test-backend]
+    - name: Run Bandit security linter
+      run: |
+        pip install bandit
+        bandit -r backend-api/src/ -f json -o bandit-report.json
+
+    - name: Run npm audit
+      run: |
+        cd services/frontend && npm audit --audit-level moderate
+        cd ../../admin-interface && npm audit --audit-level moderate
+
+  build:
+    needs: [test, security]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
-    permissions:
-      contents: read
-      packages: write
     
     strategy:
       matrix:
-        service: [frontend, healthcheck-api, project-bridge]
-    
+        service: [frontend, backend-api, admin-interface, healthcheck-api, project-bridge, watchdog, vpn-bridge]
+
     steps:
     - uses: actions/checkout@v4
-    
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
     - name: Log in to Container Registry
       uses: docker/login-action@v3
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    
+
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.service }}
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}
         tags: |
           type=ref,event=branch
           type=ref,event=pr
           type=sha,prefix={{branch}}-
           type=raw,value=latest,enable={{is_default_branch}}
-    
+
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
-        context: services/${{ matrix.service }}
+        context: ./${{ matrix.service == 'frontend' && 'services/frontend' || matrix.service }}
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
 
-  # Infrastructure Validation
-  validate-terraform:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.6.0
-    
-    - name: Terraform Format Check
-      working-directory: iac/terraform
-      run: terraform fmt -check
-    
-    - name: Terraform Init
-      working-directory: iac/terraform
-      run: terraform init -backend=false
-    
-    - name: Terraform Validate
-      working-directory: iac/terraform
-      run: terraform validate
-
-  # Ansible Lint
-  lint-ansible:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    
-    - name: Install Ansible and ansible-lint
-      run: |
-        pip install ansible ansible-lint
-    
-    - name: Run ansible-lint
-      working-directory: iac/ansible
-      run: ansible-lint deploy.yml
-
-  # Deploy to Staging
   deploy-staging:
-    needs: [build-and-push, validate-terraform, lint-ansible]
-    runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/develop'
+    needs: build
+    runs-on: ubuntu-latest
     environment: staging
     
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.6.0
-    
-    - name: Configure GCP credentials
-      uses: google-github-actions/auth@v2
-      with:
-        credentials_json: ${{ secrets.GCP_SA_KEY }}
-    
-    - name: Deploy to staging
-      working-directory: iac/terraform
-      run: |
-        terraform init
-        terraform workspace select staging || terraform workspace new staging
-        terraform plan -var="environment=staging" -var="project_id=${{ secrets.GCP_PROJECT_ID }}"
-        terraform apply -auto-approve -var="environment=staging" -var="project_id=${{ secrets.GCP_PROJECT_ID }}"
 
-  # Deploy to Production
+    - name: Set up Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: '3.12.0'
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: '1.28.0'
+
+    - name: Configure kubectl
+      run: |
+        echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+
+    - name: Deploy to staging
+      run: |
+        helm upgrade --install projecthosting-staging ./k8s/helm/projecthosting \
+          --namespace staging \
+          --create-namespace \
+          --set image.tag=${{ github.sha }} \
+          --set ingress.hosts[0].host=staging.projecthosting.dev \
+          --set postgresql.auth.password=${{ secrets.POSTGRES_PASSWORD_STAGING }} \
+          --values k8s/helm/projecthosting/values-staging.yaml
+
   deploy-production:
-    needs: [build-and-push, validate-terraform, lint-ansible]
-    runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
     environment: production
     
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.6.0
-    
-    - name: Configure GCP credentials
-      uses: google-github-actions/auth@v2
-      with:
-        credentials_json: ${{ secrets.GCP_SA_KEY }}
-    
-    - name: Deploy to production
-      working-directory: iac/terraform
-      run: |
-        terraform init
-        terraform workspace select production || terraform workspace new production
-        terraform plan -var="environment=production" -var="project_id=${{ secrets.GCP_PROJECT_ID }}"
-        terraform apply -auto-approve -var="environment=production" -var="project_id=${{ secrets.GCP_PROJECT_ID }}"
-    
-    - name: Configure servers with Ansible
-      working-directory: iac/ansible
-      run: |
-        pip install ansible
-        ansible-playbook -i inventory.yml deploy.yml --extra-vars "environment=production"
 
-  # Notify deployment
-  notify:
-    needs: [deploy-production]
+    - name: Set up Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: '3.12.0'
+
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: '1.28.0'
+
+    - name: Configure kubectl
+      run: |
+        echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > kubeconfig
+        export KUBECONFIG=kubeconfig
+
+    - name: Deploy to production
+      run: |
+        helm upgrade --install projecthosting ./k8s/helm/projecthosting \
+          --namespace production \
+          --create-namespace \
+          --set image.tag=${{ github.sha }} \
+          --set ingress.hosts[0].host=projecthosting.dev \
+          --set postgresql.auth.password=${{ secrets.POSTGRES_PASSWORD_PRODUCTION }} \
+          --values k8s/helm/projecthosting/values-production.yaml
+
+  e2e-tests:
+    if: github.ref == 'refs/heads/main'
+    needs: deploy-staging
     runs-on: ubuntu-latest
-    if: always()
     
     steps:
-    - name: Notify deployment status
-      uses: 8398a7/action-slack@v3
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
       with:
-        status: ${{ job.status }}
-        channel: '#deployments'
-        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        node-version: '18'
+
+    - name: Install Playwright
+      run: |
+        npm install -g @playwright/test
+        npx playwright install
+
+    - name: Run E2E tests
+      env:
+        BASE_URL: https://staging.projecthosting.dev
+      run: |
+        npx playwright test tests/e2e/
+
+    - name: Upload E2E test results
+      uses: actions/upload-artifact@v3
       if: always()
+      with:
+        name: playwright-report
+        path: playwright-report/
 

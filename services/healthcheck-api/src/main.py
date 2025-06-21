@@ -1,19 +1,46 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 import requests
 import time
+import logging
 from datetime import datetime
 import sqlite3
 import os
 
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, os.getenv('LOG_LEVEL', 'INFO')),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('/app/logs/healthcheck-api.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 CORS(app, origins="*")  # Allow all origins for development
 
+# Prometheus metrics
+HEALTH_CHECK_COUNTER = Counter('health_checks_total', 'Total health checks performed', ['project', 'status'])
+HEALTH_CHECK_DURATION = Histogram('health_check_duration_seconds', 'Health check duration', ['project'])
+PROJECT_STATUS_GAUGE = Gauge('project_status', 'Project status (1=online, 0=offline)', ['project', 'url'])
+RESPONSE_TIME_GAUGE = Gauge('project_response_time_seconds', 'Project response time', ['project'])
+API_REQUEST_COUNTER = Counter('api_requests_total', 'Total API requests', ['endpoint', 'method', 'status'])
+UPTIME_GAUGE = Gauge('healthcheck_api_uptime_seconds', 'API uptime in seconds')
+
+# Track start time
+start_time = time.time()
+
 # Database setup
-DATABASE = 'src/database/app.db'
+DATABASE = '/app/database/app.db'
 
 def init_db():
     """Initialize the database with required tables"""
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(DATABASE), exist_ok=True)
+    
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
     
@@ -60,6 +87,7 @@ def init_db():
             'INSERT INTO projects (name, url) VALUES (?, ?)',
             sample_projects
         )
+        logger.info("Inserted sample projects into database")
     
     conn.commit()
     conn.close()
@@ -67,9 +95,9 @@ def init_db():
 def check_url_health(url):
     """Check the health of a given URL"""
     try:
-        start_time = time.time()
-        response = requests.get(url, timeout=10)
-        response_time = time.time() - start_time
+        start_time_check = time.time()
+        response = requests.get(url, timeout=10, headers={'User-Agent': 'HealthCheck/1.0'})
+        response_time = time.time() - start_time_check
         
         if response.status_code == 200:
             return {
@@ -107,9 +135,64 @@ def check_url_health(url):
             'error_message': str(e)
         }
 
+@app.before_request
+def before_request():
+    request.start_time = time.time()
+
+@app.after_request
+def after_request(response):
+    # Update uptime
+    UPTIME_GAUGE.set(time.time() - start_time)
+    
+    # Record API metrics
+    endpoint = request.endpoint or 'unknown'
+    API_REQUEST_COUNTER.labels(
+        endpoint=endpoint,
+        method=request.method,
+        status=response.status_code
+    ).inc()
+    
+    # Log request
+    duration = time.time() - request.start_time
+    logger.info(f"{request.method} {request.path} - {response.status_code} - {duration:.3f}s")
+    
+    return response
+
+@app.route('/health')
+def health():
+    """Health check endpoint"""
+    try:
+        # Test database connection
+        conn = sqlite3.connect(DATABASE)
+        cursor = conn.cursor()
+        cursor.execute('SELECT 1')
+        conn.close()
+        db_status = 'healthy'
+    except Exception as e:
+        db_status = f'unhealthy: {str(e)}'
+        logger.error(f"Database health check failed: {str(e)}")
+    
+    health_data = {
+        'status': 'healthy' if db_status == 'healthy' else 'degraded',
+        'timestamp': datetime.now().isoformat(),
+        'service': 'healthcheck-api',
+        'uptime_seconds': time.time() - start_time,
+        'checks': {
+            'database': db_status
+        }
+    }
+    
+    status_code = 200 if health_data['status'] == 'healthy' else 503
+    return jsonify(health_data), status_code
+
+@app.route('/metrics')
+def metrics():
+    """Prometheus metrics endpoint"""
+    return generate_latest(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
+
 @app.route('/api/health', methods=['GET'])
 def api_health():
-    """API health endpoint"""
+    """API health endpoint (legacy)"""
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
@@ -130,17 +213,59 @@ def get_projects():
     
     projects = []
     for row in cursor.fetchall():
-        projects.append({
+        project_data = {
             'id': row[0],
             'name': row[1],
             'url': row[2],
             'status': row[3],
             'last_checked': row[4],
             'response_time': row[5]
-        })
+        }
+        projects.append(project_data)
+        
+        # Update Prometheus metrics
+        status_value = 1 if row[3] == 'online' else 0
+        PROJECT_STATUS_GAUGE.labels(project=row[1], url=row[2]).set(status_value)
+        if row[5] is not None:
+            RESPONSE_TIME_GAUGE.labels(project=row[1]).set(row[5])
     
     conn.close()
     return jsonify(projects)
+
+@app.route('/api/projects', methods=['POST'])
+def create_project():
+    """Create a new project"""
+    data = request.get_json()
+    
+    if not data or 'name' not in data or 'url' not in data:
+        return jsonify({'error': 'Name and URL are required'}), 400
+    
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute(
+            'INSERT INTO projects (name, url) VALUES (?, ?)',
+            (data['name'], data['url'])
+        )
+        project_id = cursor.lastrowid
+        conn.commit()
+        
+        logger.info(f"Created new project: {data['name']} - {data['url']}")
+        
+        return jsonify({
+            'id': project_id,
+            'name': data['name'],
+            'url': data['url'],
+            'status': 'unknown',
+            'created_at': datetime.now().isoformat()
+        }), 201
+        
+    except Exception as e:
+        logger.error(f"Error creating project: {str(e)}")
+        return jsonify({'error': 'Failed to create project'}), 500
+    finally:
+        conn.close()
 
 @app.route('/api/projects/<int:project_id>/check', methods=['POST'])
 def check_project(project_id):
@@ -149,17 +274,25 @@ def check_project(project_id):
     cursor = conn.cursor()
     
     # Get project URL
-    cursor.execute('SELECT url FROM projects WHERE id = ?', (project_id,))
+    cursor.execute('SELECT name, url FROM projects WHERE id = ?', (project_id,))
     result = cursor.fetchone()
     
     if not result:
         conn.close()
         return jsonify({'error': 'Project not found'}), 404
     
-    url = result[0]
+    name, url = result
     
-    # Perform health check
-    health_result = check_url_health(url)
+    # Perform health check with metrics
+    with HEALTH_CHECK_DURATION.labels(project=name).time():
+        health_result = check_url_health(url)
+    
+    # Update Prometheus metrics
+    HEALTH_CHECK_COUNTER.labels(project=name, status=health_result['status']).inc()
+    status_value = 1 if health_result['status'] == 'online' else 0
+    PROJECT_STATUS_GAUGE.labels(project=name, url=url).set(status_value)
+    if health_result['response_time'] is not None:
+        RESPONSE_TIME_GAUGE.labels(project=name).set(health_result['response_time'])
     
     # Update project status
     cursor.execute('''
@@ -188,8 +321,11 @@ def check_project(project_id):
     conn.commit()
     conn.close()
     
+    logger.info(f"Health check for {name}: {health_result['status']}")
+    
     return jsonify({
         'project_id': project_id,
+        'name': name,
         'url': url,
         **health_result,
         'checked_at': datetime.now().isoformat()
@@ -210,8 +346,16 @@ def check_all_projects():
     for project in projects:
         project_id, name, url = project
         
-        # Perform health check
-        health_result = check_url_health(url)
+        # Perform health check with metrics
+        with HEALTH_CHECK_DURATION.labels(project=name).time():
+            health_result = check_url_health(url)
+        
+        # Update Prometheus metrics
+        HEALTH_CHECK_COUNTER.labels(project=name, status=health_result['status']).inc()
+        status_value = 1 if health_result['status'] == 'online' else 0
+        PROJECT_STATUS_GAUGE.labels(project=name, url=url).set(status_value)
+        if health_result['response_time'] is not None:
+            RESPONSE_TIME_GAUGE.labels(project=name).set(health_result['response_time'])
         
         # Update project status
         cursor.execute('''
@@ -247,9 +391,13 @@ def check_all_projects():
     conn.commit()
     conn.close()
     
+    online_count = sum(1 for r in results if r['status'] == 'online')
+    logger.info(f"Checked all projects: {online_count}/{len(results)} online")
+    
     return jsonify({
         'checked_at': datetime.now().isoformat(),
         'total_projects': len(results),
+        'online_projects': online_count,
         'results': results
     })
 
@@ -307,19 +455,25 @@ def get_stats():
     cursor.execute('SELECT AVG(response_time) FROM projects WHERE response_time IS NOT NULL')
     avg_response_time = cursor.fetchone()[0]
     
+    # Get uptime percentage
+    uptime_percentage = (status_counts.get('online', 0) / total_projects * 100) if total_projects > 0 else 0
+    
     conn.close()
     
     return jsonify({
         'total_projects': total_projects,
         'status_counts': status_counts,
         'average_response_time': avg_response_time,
-        'uptime_percentage': (status_counts.get('online', 0) / total_projects * 100) if total_projects > 0 else 0
+        'uptime_percentage': uptime_percentage,
+        'api_uptime': time.time() - start_time
     })
 
 if __name__ == '__main__':
     # Initialize database
     init_db()
+    logger.info("HealthCheck API starting up")
     
     # Run the app
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.getenv('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
 

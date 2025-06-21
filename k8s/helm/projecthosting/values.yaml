@@ -1,0 +1,262 @@
+# Default values for projecthosting
+# This is a YAML-formatted file
+
+# Global configuration
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+
+# Image configuration
+image:
+  registry: docker.io
+  repository: projecthosting
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# Replica configuration
+replicaCount:
+  frontend: 2
+  backend: 3
+  bridge: 2
+  healthcheck: 1
+  watchdog: 1
+  vpn: 1
+
+# Service configuration
+service:
+  type: ClusterIP
+  ports:
+    frontend: 80
+    backend: 8000
+    bridge: 5001
+    healthcheck: 5000
+    watchdog: 8081
+    vpn: 8080
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: projecthosting.local
+      paths:
+        - path: /
+          pathType: Prefix
+          service: frontend
+        - path: /api
+          pathType: Prefix
+          service: backend
+        - path: /bridge
+          pathType: Prefix
+          service: bridge
+        - path: /health
+          pathType: Prefix
+          service: healthcheck
+  tls:
+    - secretName: projecthosting-tls
+      hosts:
+        - projecthosting.local
+
+# Resource limits
+resources:
+  frontend:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  backend:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+  bridge:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  healthcheck:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  watchdog:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  vpn:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# Autoscaling
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# Node selection
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+
+# Environment variables
+env:
+  # Database configuration
+  DATABASE_URL: "postgresql://projecthosting:password@postgresql:5432/projecthosting"
+  REDIS_URL: "redis://redis:6379/0"
+  
+  # JWT configuration
+  JWT_SECRET_KEY: "your-jwt-secret-key-change-in-production"
+  
+  # Logging
+  LOG_LEVEL: "INFO"
+  
+  # Monitoring
+  PROMETHEUS_URL: "http://prometheus:9090"
+  GRAFANA_URL: "http://grafana:3000"
+  
+  # VPN configuration
+  TAILSCALE_HOSTNAME: "projecthosting-k8s"
+  TAILSCALE_ROUTES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+
+# Secrets (use external secret management in production)
+secrets:
+  tailscaleAuthKey: "tskey-auth-your-key-here"
+  databasePassword: "password"
+  jwtSecret: "your-jwt-secret-key"
+
+# Persistent volumes
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size:
+    database: 10Gi
+    logs: 5Gi
+    uploads: 20Gi
+
+# PostgreSQL configuration (if using bundled chart)
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: "postgres"
+    username: "projecthosting"
+    password: "password"
+    database: "projecthosting"
+  primary:
+    persistence:
+      enabled: true
+      size: 10Gi
+
+# Redis configuration (if using bundled chart)
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  master:
+    persistence:
+      enabled: true
+      size: 5Gi
+
+# Monitoring configuration
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+    server:
+      persistentVolume:
+        enabled: true
+        size: 10Gi
+  grafana:
+    enabled: true
+    persistence:
+      enabled: true
+      size: 5Gi
+    adminPassword: "admin"
+
+# Network policies
+networkPolicy:
+  enabled: true
+  ingress:
+    enabled: true
+  egress:
+    enabled: true
+
+# Service mesh (Istio)
+serviceMesh:
+  enabled: false
+  istio:
+    enabled: false
+
+# Backup configuration
+backup:
+  enabled: false
+  schedule: "0 2 * * *"
+  retention: "7d"
+
+# Health checks
+healthCheck:
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+  successThreshold: 1
+
+# Probes
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Service monitor for Prometheus
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+

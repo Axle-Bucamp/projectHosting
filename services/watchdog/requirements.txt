@@ -1,6 +1,5 @@
 flask==2.3.3
-flask-cors
 requests==2.31.0
-db-sqlite3
+prometheus-client==0.17.1
 schedule==1.2.0
-prometheus_client
+

@@ -8,7 +8,8 @@ import {
   MessageSquare,
   FileText,
   Settings,
-  Shield
+  Shield,
+  ScrollText
 } from 'lucide-react';
 
 const navigation = [
@@ -17,6 +18,7 @@ const navigation = [
   { name: 'Store', href: '/store', icon: Store },
   { name: 'Contacts', href: '/contacts', icon: MessageSquare },
   { name: 'Contenu', href: '/content', icon: FileText },
+  { name: 'Logs', href: '/logs', icon: ScrollText },
   { name: 'Système', href: '/system', icon: Settings },
 ];
 
