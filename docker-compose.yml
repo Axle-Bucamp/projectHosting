@@ -13,6 +13,7 @@ services:
       - REACT_APP_API_URL=${REACT_APP_API_URL}
     networks:
       - startup-network-alt
+    # volume path icon
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:80"]
@@ -32,7 +33,7 @@ services:
       dockerfile: Dockerfile
     container_name: startup-backend-api
     ports:
-      - "8000:8000"
+      - "8090:5000"
     environment:
       - FLASK_ENV=production
       - DATABASE_URL=postgresql://startup:startup_password@postgres:5432/startup_db
@@ -43,7 +44,7 @@ services:
       - startup-network-alt
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -247,19 +248,14 @@ services:
     image: gcr.io/cadvisor/cadvisor:latest
     container_name: startup-cadvisor
     ports:
-      - "8080:8080"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro      # Docker socket for container info
-      - /sys/fs/cgroup:/sys/fs/cgroup:ro                 # cgroups info
-      - /proc:/proc:ro                                    # process info
-    privileged: true
-    devices:
-      - /dev/kmsg                                        # kernel logs, remove if errors on Windows
+      - "8086:8080"  # expose cAdvisor on localhost:8086
+    privileged: true  # necessary for full metrics
     networks:
       - startup-network-alt
     restart: unless-stopped
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+
 
 
   # Alertmanager for Alerts

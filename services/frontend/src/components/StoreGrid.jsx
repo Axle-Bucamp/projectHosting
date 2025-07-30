@@ -16,9 +16,16 @@ const StoreGrid = () => {
     try {
       const response = await fetch('/api/store');
       const data = await response.json();
-      
+
       if (data.success) {
-        setItems(data.items || []);
+        const fixedItems = (data.items || []).map(item => ({
+          ...item,
+          features: typeof item.features === 'string'
+            ? JSON.parse(item.features)
+            : item.features
+        }));
+
+        setItems(fixedItems);
       }
     } catch (error) {
       console.error('Failed to fetch store items:', error);

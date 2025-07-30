@@ -18,7 +18,14 @@ const ProjectList = () => {
       const data = await response.json();
       
       if (data.success) {
-        setProjects(data.projects || []);
+        const fixedProjects = data.projects.map(project => ({
+            ...project,
+            technologies: typeof project.technologies === 'string'
+              ? JSON.parse(project.technologies)
+              : project.technologies
+          }));
+
+        setProjects(fixedProjects);
       }
     } catch (error) {
       console.error('Failed to fetch projects:', error);

@@ -43,7 +43,7 @@ def health_check():
 @app.route('/metrics', methods=['GET'])
 def metrics():
     """API metrics endpoint"""
-    return jsonify({})
+    return {}, 200
 
 @app.route('/health', methods=['GET'])
 def health():
