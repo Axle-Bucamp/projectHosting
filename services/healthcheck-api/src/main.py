@@ -116,6 +116,20 @@ def api_health():
         'service': 'healthcheck-api'
     })
 
+@app.route('/metrics', methods=['GET'])
+def metrics():
+    """API metrics endpoint"""
+    return jsonify({})
+
+@app.route('/health', methods=['GET'])
+def health():
+    """API health endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'service': 'healthcheck-api'
+    }), 200
+
 @app.route('/api/projects', methods=['GET'])
 def get_projects():
     """Get all projects with their current status"""

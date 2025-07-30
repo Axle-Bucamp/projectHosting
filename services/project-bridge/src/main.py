@@ -268,6 +268,16 @@ def get_bridge_stats():
         'requests_by_service': requests_by_service
     })
 
+@app.route('/metrics', methods=['GET'])
+def metrics():
+    """API metrics endpoint"""
+    return jsonify({})
+
+@app.route('/health', methods=['GET'])
+def health():
+    """API health endpoint"""
+    return {'status': 'healthy', 'service': 'startup-project-bridge'}, 200
+
 @app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
 def proxy_request(path):
     """Proxy requests to appropriate services"""

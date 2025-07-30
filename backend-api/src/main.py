@@ -39,6 +39,17 @@ def health_check():
     return {'status': 'healthy', 'service': 'startup-backend-api'}, 200
 
 @app.route('/', defaults={'path': ''})
+
+@app.route('/metrics', methods=['GET'])
+def metrics():
+    """API metrics endpoint"""
+    return jsonify({})
+
+@app.route('/health', methods=['GET'])
+def health():
+    """API health endpoint"""
+    return {'status': 'healthy', 'service': 'startup-backend-api'}, 200
+
 @app.route('/<path:path>')
 def serve(path):
     static_folder_path = app.static_folder
