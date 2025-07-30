@@ -21,16 +21,16 @@ const Footer = () => {
             </p>
             <div className="flex space-x-4">
               <a 
-                href="https://github.com" 
-                target="_blank" 
+                href="https://github.com/BrawlAnything" 
+                target="https://github.com/BrawlAnything" 
                 rel="noopener noreferrer"
                 className="text-muted-foreground hover:text-foreground transition-colors duration-200"
               >
                 <Github className="h-5 w-5" />
               </a>
               <a 
-                href="https://linkedin.com" 
-                target="_blank" 
+                href="https://www.linkedin.com/in/axle-bucamp-b06ab0142/" 
+                target="https://www.linkedin.com/in/axle-bucamp-b06ab0142/" 
                 rel="noopener noreferrer"
                 className="text-muted-foreground hover:text-foreground transition-colors duration-200"
               >
@@ -92,15 +92,15 @@ const Footer = () => {
             <ul className="space-y-3">
               <li className="flex items-center space-x-2 text-muted-foreground">
                 <Mail className="h-4 w-4" />
-                <span>contact@startup.com</span>
+                <span>axle.bucamp@guidry-cloud.com</span>
               </li>
               <li className="flex items-center space-x-2 text-muted-foreground">
                 <Phone className="h-4 w-4" />
-                <span>+33 1 23 45 67 89</span>
+                <span>+33 6 38 82 89 15</span>
               </li>
               <li className="flex items-center space-x-2 text-muted-foreground">
                 <MapPin className="h-4 w-4" />
-                <span>Paris, France</span>
+                <span>Wimille, France</span>
               </li>
             </ul>
           </div>
